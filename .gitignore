@@ -1,10 +1,32 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 .pytest_cache/
+build/
+dist/
 
 # Virtual environment
 .venv/
+venv/
+env/
+
+# Secrets / environment config
+.env
+.env.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS cruft
+.DS_Store
+Thumbs.db
 
 # Runtime-generated data (not fixtures) - these grow with real usage and
 # shouldn't be versioned. The sample logs in logs/ are fixtures and ARE
