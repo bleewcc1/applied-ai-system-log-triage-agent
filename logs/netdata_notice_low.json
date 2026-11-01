@@ -1,0 +1,12 @@
+{
+  "alarm": "disk_space_usage",
+  "chart": "disk.space._",
+  "family": "disk",
+  "host": "db-server-02",
+  "timestamp": "2026-10-31T12:10:05Z",
+  "status": "CLEARED",
+  "value": 41.2,
+  "units": "%",
+  "anomaly_rate": 0.03,
+  "info": "notice: disk space usage returned to normal range after cleanup job completed"
+}

@@ -1,0 +1,6 @@
+[**] [1:2101201:4] GPL INFO VNC server response [**]
+[Classification: Attempted Information Leak] [Priority: 2]
+10/31-12:05:41.221873 198.51.100.23:5901 -> 10.0.0.42:51022
+TCP TTL:55 TOS:0x0 ID:33021 IpLen:20 DgmLen:124 DF
+***AP*** Seq: 0x9A2E1B07  Ack: 0x33C9A410  Win: 0x7D0  TcpLen: 32
+[Xref => http://doc.emergingthreats.net/2101201]

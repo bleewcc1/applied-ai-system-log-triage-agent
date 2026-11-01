@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environment
+.venv/
+
+# Runtime-generated data (not fixtures) - these grow with real usage and
+# shouldn't be versioned. The sample logs in logs/ are fixtures and ARE
+# tracked.
+ai_interactions.md
+logs/triage_history.csv
+logs/human_evaluations.csv

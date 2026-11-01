@@ -1,0 +1,19 @@
+{
+  "alarm": "10min_cpu_usage",
+  "chart": "system.cpu",
+  "family": "cpu",
+  "host": "web-server-01",
+  "timestamp": "2026-10-31T11:42:30Z",
+  "status": "CRITICAL",
+  "previous_status": "WARNING",
+  "value": 97.4,
+  "units": "%",
+  "threshold": {"warning": 75, "critical": 90},
+  "anomaly_rate": 0.82,
+  "info": "average cpu utilization over the last 10 minutes (excluding iowait, nice and steal)",
+  "related_metrics": {
+    "system.load1": 14.2,
+    "mem.available_mb": 212,
+    "disk.io_wait_pct": 3.1
+  }
+}

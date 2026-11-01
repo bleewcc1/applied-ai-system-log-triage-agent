@@ -1,0 +1,25 @@
+flowchart TD
+    A[User: uploads log file] --> B["Streamlit App\n(streamlit_app.py)"]
+    B --> C["Decode bytes to text\n(utf-8, errors='replace')"]
+    C --> D["triage_agent.process_log()"]
+
+    subgraph LOOP["Agent Plan / Act / Check Loop (triage_agent.py)"]
+        direction TB
+        D --> P["PLAN\n- corruption guardrail check\n- scan for intrusion vs anomaly signals"]
+        P -->|content too garbled| X["raise ValueError\n(safe fallback, no classification)"]
+        P -->|content usable| ACT["ACT\n- extract IP addresses\n- classify log_type\n- determine severity\n- compute confidence_score"]
+        ACT --> MIT["Build mitigation text\nfrom observed evidence only"]
+        MIT --> CHK["CHECK\n- verify no IP in mitigation is hallucinated\n- guardrail: confidence_score must be present"]
+        CHK -->|check fails| X
+    end
+
+    CHK -->|checks pass| J["JSON Output\n(severity, confidence_score, mitigation)"]
+    P -.-> LOGFILE[("ai_interactions.md\nPlan/Act/Check trace")]
+    ACT -.-> LOGFILE
+    CHK -.-> LOGFILE
+    X -.-> LOGFILE
+
+    J --> UI["Streamlit App renders result\n(severity badge, confidence metric,\nmitigation text, raw JSON)"]
+    X --> UIERR["Streamlit App renders error\n(st.error: 'Agent refused to classify...')"]
+    UI --> E[User: views triage result]
+    UIERR --> E

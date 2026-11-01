@@ -1,0 +1,12 @@
+[**] [1:2024364:5] ET SCAN Possible Nmap User-Agent Observed [**]
+[Classification: Web Application Attack] [Priority: 1]
+10/31-11:42:07.318452 192.168.1.50:51734 -> 10.0.0.15:80
+TCP TTL:64 TOS:0x0 ID:48213 IpLen:20 DgmLen:312 DF
+***AP*** Seq: 0x5B2A91C4  Ack: 0x1F8E03A7  Win: 0x1F6  TcpLen: 32
+[Xref => http://doc.emergingthreats.net/2024364]
+
+[**] [1:1000001:1] LOCAL SSH brute force attempt detected [**]
+[Classification: Attempted Administrator Privilege Gain] [Priority: 1]
+10/31-11:42:19.804116 203.0.113.77:40122 -> 10.0.0.15:22
+TCP TTL:52 TOS:0x0 ID:9021 IpLen:20 DgmLen:60 DF
+******S* Seq: 0x7C11D3E0  Ack: 0x0  Win: 0x3908  TcpLen: 40
