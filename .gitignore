@@ -17,6 +17,7 @@ env/
 # Secrets / environment config
 .env
 .env.*
+!.env.example
 
 # Editor / IDE
 .vscode/
@@ -34,3 +35,7 @@ Thumbs.db
 ai_interactions.md
 logs/triage_history.csv
 logs/human_evaluations.csv
+
+# Chroma's persisted vector store (specialized_agent.py) - rebuilt
+# automatically from specialized_fewshot_dataset.py on first run.
+.chroma_db/

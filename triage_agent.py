@@ -48,11 +48,14 @@ PLAYBOOKS_DIR = Path("playbooks")
 
 IP_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
-# Which playbook file answers for which log_type. log_type "unknown" has
-# no playbook - there is nothing specific to retrieve instructions for.
+# Which playbook file answers for which log_type. "unknown" (a log that
+# doesn't match the Snort/Netdata signal keywords, but isn't corrupted
+# either - see PLAN's corruption guardrail for that case) falls back to
+# the general playbook rather than skipping retrieval entirely.
 PLAYBOOK_BY_LOG_TYPE = {
     "network_intrusion": "snort_playbook.md",
     "resource_anomaly": "netdata_playbook.md",
+    "unknown": "general_playbook.md",
 }
 
 # Each playbook groups its steps under "## Severity: <HEADING>" sections.

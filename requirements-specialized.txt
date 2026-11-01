@@ -1,0 +1,11 @@
+# Optional dependencies for the Fine-Tuning/Specialization bonus module
+# (specialized_agent.py, compare_baseline_vs_specialized.py). Not required
+# to run the main app, triage_agent.py, or the pytest suite - install
+# this only if you're using the Chroma + Gemini Flash classifier.
+#
+#   pip install -r requirements-specialized.txt
+#   export GEMINI_API_KEY="your-google-ai-studio-key"
+
+chromadb
+google-genai
+python-dotenv

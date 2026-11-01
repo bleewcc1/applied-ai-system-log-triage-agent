@@ -1,25 +1,44 @@
 flowchart TD
-    A[User: uploads log file] --> B["Streamlit App\n(streamlit_app.py)"]
-    B --> C["Decode bytes to text\n(utf-8, errors='replace')"]
-    C --> D["triage_agent.process_log()"]
-
-    subgraph LOOP["Agent Plan / Act / Check Loop (triage_agent.py)"]
-        direction TB
-        D --> P["PLAN\n- corruption guardrail check\n- scan for intrusion vs anomaly signals"]
-        P -->|content too garbled| X["raise ValueError\n(safe fallback, no classification)"]
-        P -->|content usable| ACT["ACT\n- extract IP addresses\n- classify log_type\n- determine severity\n- compute confidence_score"]
-        ACT --> MIT["Build mitigation text\nfrom observed evidence only"]
-        MIT --> CHK["CHECK\n- verify no IP in mitigation is hallucinated\n- guardrail: confidence_score must be present"]
-        CHK -->|check fails| X
+    subgraph INPUT["📥 INPUT"]
+        A["User uploads a log file\n(Snort alert or Netdata alarm)"]
     end
 
-    CHK -->|checks pass| J["JSON Output\n(severity, confidence_score, mitigation)"]
-    P -.-> LOGFILE[("ai_interactions.md\nPlan/Act/Check trace")]
-    ACT -.-> LOGFILE
-    CHK -.-> LOGFILE
-    X -.-> LOGFILE
+    A --> B["Streamlit App\ndecode bytes to text (utf-8, errors='replace')"]
 
-    J --> UI["Streamlit App renders result\n(severity badge, confidence metric,\nmitigation text, raw JSON)"]
-    X --> UIERR["Streamlit App renders error\n(st.error: 'Agent refused to classify...')"]
-    UI --> E[User: views triage result]
-    UIERR --> E
+    subgraph AGENT["🤖 AGENT — triage_agent.process_log() : Plan → Act → Retrieve → Check"]
+        direction TB
+        PLAN["PLAN\ncorruption guardrail check,\nscan for intrusion vs. anomaly signals"]
+        ACT["ACT\nextract IP addresses, classify log_type,\ndetermine severity, compute confidence_score"]
+        RETRIEVER["RETRIEVER\nread the matching playbook\n(playbooks/snort_playbook.md or\nplaybooks/netdata_playbook.md),\nextract the section for this severity"]
+        CHECK["CHECK\nverify no IP in the mitigation was\nhallucinated; verify confidence_score\nis present (guardrail)"]
+        PLAN --> ACT --> RETRIEVER --> CHECK
+    end
+
+    B --> PLAN
+    CHECK -->|guardrail fails| ERR["Safe-fallback ValueError\nno result invented - raised, not guessed"]
+    CHECK -->|guardrail passes| OUT["📤 OUTPUT — JSON\nseverity, confidence_score, mitigation,\nplaybook_file, observed_ips"]
+
+    OUT --> UI["Streamlit UI renders the result\n(severity badge, confidence metric,\nmitigation, playbook download,\nthreat-intel lookup links)"]
+    ERR --> UIERR["Streamlit UI renders the error\n(st.error - agent refused to guess)"]
+
+    subgraph HUMAN["🧑‍💻 HUMAN REVIEW — in the Streamlit app"]
+        direction TB
+        REVIEW["Analyst clicks\n✅ Approve  or  ❌ Reject"]
+        HUMANCSV[("logs/human_evaluations.csv\ntimestamp, filename, ai_severity,\nhuman_decision")]
+        REVIEW --> HUMANCSV
+    end
+
+    UI --> REVIEW
+
+    subgraph EVAL["🧪 EVALUATOR / TESTER — automated checks on the agent"]
+        direction TB
+        PYTEST["test_agent.py (pytest)\nclean logs -> valid JSON;\ncorrupted log -> safe-fallback error,\nnever a crash"]
+        HISTORYCSV[("logs/triage_history.csv\nevery triage attempt, success or error")]
+        DASHBOARD["Dashboard tab\nseverity breakdown,\nAI/human agreement rate\noverall and by severity"]
+        HISTORYCSV --> DASHBOARD
+        HUMANCSV --> DASHBOARD
+    end
+
+    PYTEST -. "runs against" .-> AGENT
+    OUT -. "every attempt logged" .-> HISTORYCSV
+    ERR -. "every attempt logged" .-> HISTORYCSV
