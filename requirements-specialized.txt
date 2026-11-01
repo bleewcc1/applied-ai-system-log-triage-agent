@@ -9,3 +9,4 @@
 chromadb
 google-genai
 python-dotenv
+pypdf

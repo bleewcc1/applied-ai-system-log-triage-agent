@@ -28,6 +28,7 @@ env/
 # OS cruft
 .DS_Store
 Thumbs.db
+._*
 
 # Runtime-generated data (not fixtures) - these grow with real usage and
 # shouldn't be versioned. The sample logs in logs/ are fixtures and ARE
