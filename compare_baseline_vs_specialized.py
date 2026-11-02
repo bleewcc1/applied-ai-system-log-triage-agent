@@ -50,7 +50,7 @@ def main() -> None:
         try:
             specialized = classify_with_llm(content)
             print(json.dumps(specialized, indent=2))
-        except (RuntimeError, ValueError) as exc:
+        except Exception as exc:
             print(f"specialized_agent failed: {exc}")
 
         print()

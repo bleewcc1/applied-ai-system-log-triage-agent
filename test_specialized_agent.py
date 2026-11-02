@@ -916,3 +916,96 @@ def test_add_custom_document_dimension_mismatch_raises_clear_error_without_delet
 
     with pytest.raises(ValueError, match="clear_knowledge_base"):
         specialized_agent.add_custom_document("doc.md", b"some reference text")
+
+
+# ---------------------------------------------------------------------------
+# query_knowledge_base (RAG QA / Chat)
+# ---------------------------------------------------------------------------
+
+def test_query_knowledge_base_missing_api_key_raises_runtime_error(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    custom_collection = FakeChromaCollection(initial_count=1)
+    _patch_chroma(monkeypatch, custom_collection, name=specialized_agent.CUSTOM_DOCS_COLLECTION_NAME)
+
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY is not set"):
+        specialized_agent.query_knowledge_base("What are the containment steps?")
+
+
+def test_query_knowledge_base_empty_query_raises_value_error(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    with pytest.raises(ValueError, match="Query cannot be empty"):
+        specialized_agent.query_knowledge_base("   ")
+
+
+def test_query_knowledge_base_empty_kb_raises_value_error(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    empty_collection = FakeChromaCollection(initial_count=0)
+    _patch_chroma(monkeypatch, empty_collection, name=specialized_agent.CUSTOM_DOCS_COLLECTION_NAME)
+
+    with pytest.raises(ValueError, match="Knowledge base is empty"):
+        specialized_agent.query_knowledge_base("What is Snort?")
+
+
+def test_query_knowledge_base_success_returns_answer_and_sources(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    custom_collection = FakeChromaCollection(
+        initial_count=1,
+        query_result={
+            "documents": [["Isolate the affected host immediately and verify switch ports."]],
+            "metadatas": [[{"filename": "playbook.md", "page_number": 2}]],
+            "distances": [[0.15]],
+        },
+    )
+    _patch_chroma(monkeypatch, custom_collection, name=specialized_agent.CUSTOM_DOCS_COLLECTION_NAME)
+
+    fake_response = SimpleNamespace(text="Isolate the host as outlined on page 2 of playbook.md.")
+    client = FakeGenaiClient(generate_content_response=fake_response)
+    monkeypatch.setattr(specialized_agent.genai, "Client", lambda api_key: client)
+
+    result = specialized_agent.query_knowledge_base("How to isolate?", k=2)
+
+    assert result["query"] == "How to isolate?"
+    assert "Isolate the host" in result["answer"]
+    assert len(result["sources"]) == 1
+    assert result["sources"][0]["filename"] == "playbook.md"
+    assert result["sources"][0]["page_number"] == 2
+    assert result["sources"][0]["distance"] == 0.15
+
+    # Verify Gemini was invoked with the retrieved context
+    model, prompt, _ = client.generate_calls[0]
+    assert model == specialized_agent.GENERATION_MODEL
+    assert "Source: [playbook.md, page 2]" in prompt
+    assert "How to isolate?" in prompt
+
+
+def test_query_knowledge_base_includes_prior_chat_history_in_prompt(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    custom_collection = FakeChromaCollection(
+        initial_count=1,
+        query_result={
+            "documents": [["Step 2: Collect memory dump before reboot."]],
+            "metadatas": [[{"filename": "ir_guide.txt"}]],
+            "distances": [[0.22]],
+        },
+    )
+    _patch_chroma(monkeypatch, custom_collection, name=specialized_agent.CUSTOM_DOCS_COLLECTION_NAME)
+
+    fake_response = SimpleNamespace(text="Collect memory dump before rebooting.")
+    client = FakeGenaiClient(generate_content_response=fake_response)
+    monkeypatch.setattr(specialized_agent.genai, "Client", lambda api_key: client)
+
+    chat_history = [
+        {"role": "user", "content": "What is step 1?"},
+        {"role": "assistant", "content": "Step 1 is host isolation."},
+    ]
+    result = specialized_agent.query_knowledge_base(
+        "What is step 2?",
+        chat_history=chat_history,
+    )
+
+    assert "Collect memory dump" in result["answer"]
+    _, prompt, _ = client.generate_calls[0]
+    assert "Prior conversation:" in prompt
+    assert "User: What is step 1?" in prompt
+    assert "Assistant: Step 1 is host isolation." in prompt
+

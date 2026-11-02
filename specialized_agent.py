@@ -744,6 +744,100 @@ def classify_with_llm(log_content: str, include_custom_docs: bool = False) -> di
     }
 
 
+def query_knowledge_base(
+    query: str,
+    k: int = 4,
+    chat_history: list[dict] | None = None,
+) -> dict[str, Any]:
+    """
+    RAG QA / CHAT: answers a natural language question grounded strictly in
+    the user-uploaded reference documents in the custom-docs Chroma collection.
+
+    Takes:
+        query: the user's natural language question.
+        k: maximum number of relevant document chunks to retrieve (default: 4).
+        chat_history: optional list of {"role": "user"|"assistant", "content": ...}
+                      dictionaries representing prior conversational turns.
+
+    Returns:
+        {
+            "query": str,
+            "answer": str,
+            "sources": list[dict],  # filename, page_number, distance, text
+        }
+
+    Raises:
+        RuntimeError: if GEMINI_API_KEY is not set.
+        ValueError: if query is empty or the knowledge base is empty.
+    """
+    cleaned_query = query.strip()
+    if not cleaned_query:
+        raise ValueError("Query cannot be empty.")
+
+    chroma_client = _get_chroma_client()
+    collection = chroma_client.get_or_create_collection(CUSTOM_DOCS_COLLECTION_NAME)
+    if collection.count() == 0:
+        raise ValueError("Knowledge base is empty. Upload reference documents before asking questions.")
+
+    client = _get_client()
+    query_embedding = _embed_texts(client, [cleaned_query])[0]
+    contexts = _retrieve_custom_doc_context(query_embedding, k=k)
+
+    if not contexts:
+        return {
+            "query": cleaned_query,
+            "answer": "No relevant context found in the uploaded documents.",
+            "sources": [],
+        }
+
+    doc_blocks = []
+    for ctx in contexts:
+        citation = f"{ctx['filename']}, page {ctx['page_number']}" if ctx.get("page_number") else ctx["filename"]
+        doc_blocks.append(f"Source: [{citation}]\n{ctx['text']}")
+    context_text = "\n\n---\n\n".join(doc_blocks)
+
+    history_text = ""
+    if chat_history:
+        history_lines = []
+        for msg in chat_history[-6:]:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            history_lines.append(f"{role}: {msg.get('content', '')}")
+        history_text = "Prior conversation:\n" + "\n".join(history_lines) + "\n\n"
+
+    prompt = (
+        "You are an expert technical assistant specializing in security operations and system log triage.\n"
+        "Answer the user's question accurately and concisely, relying ONLY on the uploaded reference document excerpts provided below.\n"
+        "If the answer cannot be determined from the excerpts, clearly state that the information is not present in the reference documents rather than speculating or hallucinating.\n"
+        "Whenever possible, cite the specific source document and page number in your response.\n\n"
+        f"--- RELEVANT REFERENCE DOCUMENT EXCERPTS ---\n\n{context_text}\n\n"
+        f"{history_text}"
+        f"User question: {cleaned_query}\n\n"
+        "Answer:"
+    )
+
+    response = client.models.generate_content(
+        model=GENERATION_MODEL,
+        contents=prompt,
+        config=None,
+    )
+
+    answer_text = response.text or ""
+
+    return {
+        "query": cleaned_query,
+        "answer": answer_text.strip(),
+        "sources": [
+            {
+                "filename": ctx["filename"],
+                "page_number": ctx.get("page_number"),
+                "distance": round(ctx["distance"], 4),
+                "text": ctx["text"],
+            }
+            for ctx in contexts
+        ],
+    }
+
+
 if __name__ == "__main__":
     import sys
 

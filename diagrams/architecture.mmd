@@ -44,15 +44,15 @@ flowchart TD
         CUSTOMDOCS[("custom_uploaded_docs\nuser-uploaded .txt/.md/.pdf,\nparagraph-chunked, page-cited")]
     end
 
-    UPLOAD["RAG Lab page:\nupload .txt/.md/.pdf reference docs"] --> ADDDOC["add_custom_document()\nextract (pypdf for PDFs) + chunk + embed"]
+    UPLOAD["RAG Knowledge Base menu:\nupload .txt/.md/.pdf reference docs"] --> ADDDOC["add_custom_document()\nextract (pypdf for PDFs) + chunk + embed"]
     ADDDOC --> CUSTOMDOCS
     RETRIEVE2 -.-> FEWSHOT
     RETRIEVE2 -.-> CUSTOMDOCS
 
     GENERATE --> SPECOUT["📤 Specialized OUTPUT — JSON\nseverity, confidence_score, mitigation,\nfew_shot_examples_used, custom_docs_used"]
 
-    B -. "RAG Lab page: same log also sent to" .-> EMBED
-    OUT -. "compared side by side in" .-> COMPARE["RAG Lab page /\ncompare_baseline_vs_specialized.py"]
+    B -. "Test vs. Baseline menu: same log also sent to" .-> EMBED
+    OUT -. "compared side by side in" .-> COMPARE["Test Retrieval vs. Baseline menu /\ncompare_baseline_vs_specialized.py"]
     SPECOUT -. "compared side by side in" .-> COMPARE
 
     subgraph EVAL["🧪 EVALUATOR / TESTER — automated checks on both agents"]

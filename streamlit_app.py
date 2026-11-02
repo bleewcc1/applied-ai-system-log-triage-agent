@@ -2,38 +2,31 @@
 streamlit_app.py
 
 UI for the log-triage agent, with a sidebar navigation panel choosing
-between three pages:
+between five pages:
 
-  Triage    - upload a log file, hand its content to
-              `triage_agent.process_log`, show the resulting severity /
-              confidence / mitigation, its Plan/Act/Retrieve/Check
-              reasoning trace, and collect a human-in-the-loop
-              Approve/Reject decision (logged to logs/human_evaluations.csv).
-              The agent runs exactly once per upload: the result and trace
-              are cached in st.session_state by Streamlit's file_id, so a
-              rerun triggered by an unrelated widget (e.g. the threat-intel
-              dropdowns) never re-triages the same file or double-logs it.
+  Baseline Triage               - upload a log file, hand its content to
+                                  `triage_agent.process_log`, show the resulting severity /
+                                  confidence / mitigation, its Plan/Act/Retrieve/Check
+                                  reasoning trace, threat intelligence lookup, and collect
+                                  a human-in-the-loop Approve/Reject decision (logged to
+                                  logs/human_evaluations.csv).
 
-  Dashboard - every triage attempt (success or safe-fallback error) is
-              logged to logs/triage_history.csv as it happens; this page
-              reads that file back and shows upload volume, a severity
-              breakdown, and the full history table, alongside the human
-              review decisions collected on the Triage page - including an
-              AI/human agreement rate, overall and broken down by severity.
+  Specialized (Chroma + Gemini) - few-shot vector retrieval + Gemini Flash classifier with
+                                  custom document citations, full JSON output, threat intel,
+                                  and human evaluation review.
 
-  RAG Lab   - the bonus Fine-Tuning/Specialization module (specialized_agent.py),
-              split into three modes:
-                - Upload Document: runs the extract/chunk/embed/index
-                  pipeline on a .txt/.md/.pdf file and reports metrics per
-                  stage (timings, chunk stats, embedding dimension).
-                - Manage Knowledge Base: list, delete, or clear what's
-                  indexed - purely local Chroma operations, no API key
-                  needed for this mode.
-                - Test Retrieval vs. Baseline: run a log through both the
-                  deterministic baseline and the Chroma + Gemini Flash
-                  classifier side by side.
-              Imports specialized_agent lazily so the Triage/Dashboard
-              pages keep working with no extra dependencies required.
+  Test Retrieval vs. Baseline   - side-by-side comparison running any log through BOTH the
+                                  deterministic baseline and the Specialized agent,
+                                  with agreement metrics and confidence comparison.
+
+  RAG Knowledge Base            - three modes for managing reference documents:
+                                    - Upload Document: extract/chunk/embed/index pipeline.
+                                    - Manage Knowledge Base: inspect, delete, or clear Chroma.
+                                    - Chat with Knowledge Base: conversational Q&A citing
+                                      uploaded reference documents.
+
+  Dashboard                     - historical triage attempts, severity breakdown, and
+                                  human/AI agreement rate analytics.
 """
 
 import csv
@@ -45,7 +38,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from triage_agent import process_log
+from triage_agent import IP_PATTERN, process_log
 
 HUMAN_EVAL_FILE = Path("logs") / "human_evaluations.csv"
 HUMAN_EVAL_FIELDS = ["timestamp", "log_filename", "ai_severity", "human_decision"]
@@ -137,24 +130,63 @@ with st.sidebar:
     st.title("🛡️ Log Triage Agent")
     page = st.radio(
         "Navigate",
-        ["🔍 Triage", "📊 Dashboard", "🧬 RAG Lab (Gemini)"],
+        [
+            "🔍 Baseline Triage",
+            "🧬 Specialized (Chroma + Gemini Flash)",
+            "🧪 Test Retrieval vs. Baseline",
+            "📚 RAG Knowledge Base",
+            "📊 Dashboard",
+        ],
         label_visibility="collapsed",
     )
     st.markdown("---")
     st.caption(
-        "A Plan → Act → Retrieve → Check loop that classifies Snort/Netdata "
-        "logs, retrieves the matching playbook, and logs human review "
-        "decisions alongside every triage attempt."
+        "A dual-agent log triage suite featuring a deterministic "
+        "Plan → Act → Retrieve → Check baseline and a Chroma + Gemini Flash "
+        "specialized classifier with RAG and human evaluation logging."
     )
+    with st.expander("📖 Menu Overview & Guide"):
+        st.markdown(
+            "**🔍 Baseline Triage:** Deterministic Plan → Act → Retrieve → Check classifier with zero external dependencies and auditable traces.\n\n"
+            "**🧬 Specialized Agent:** Few-shot LLM triage using Chroma vector retrieval + Gemini Flash with RAG document citations.\n\n"
+            "**🧪 Test vs. Baseline:** Head-to-head comparison evaluating severity agreement, confidence calibration, and guardrail behavior.\n\n"
+            "**📚 RAG Knowledge Base:** Upload `.txt`/`.md`/`.pdf` reference docs, inspect Chroma collections, and chat directly with your runbooks.\n\n"
+            "**📊 Dashboard:** Operational triage metrics, severity distribution, and human-in-the-loop approval analytics."
+        )
 
 st.title(page)
 
-if page == "🔍 Triage":
+if page in ("🔍 Baseline Triage", "🔍 Triage"):
     st.caption(
         "Upload a Snort intrusion alert or a Netdata anomaly log. The agent runs a "
         "Plan → Act → Retrieve → Check loop and returns a severity, confidence score, "
         "and mitigation recommendation."
     )
+
+    with st.expander("📖 User Guide: Baseline Triage", expanded=False):
+        st.markdown(
+            """
+            ### What This Menu Does
+            Provides **fast, 100% deterministic, zero-hallucination log triage** using a transparent
+            **Plan → Act → Retrieve → Check** agent loop. Operates completely locally without requiring an API key.
+
+            ---
+            ### How the Agent Works:
+            1. **PLAN:** Validates UTF-8 encoding integrity. If more than 5% non-printable characters or replacement characters are detected, the agent safely refuses to classify (controlled `ValueError` safe fallback).
+            2. **ACT:** Scans for signature keywords (Snort alerts vs. Netdata resource alarms), extracts all observed IPv4 addresses, determines incident severity (`critical`, `high`, `medium`, `low`, `unknown`), and calculates an evidence-grounded confidence score.
+            3. **RETRIEVE:** Pulls the exact severity section from vetted local playbooks (`playbooks/snort_playbook.md`, `netdata_playbook.md`, or `general_playbook.md`). Mitigations are built strictly from retrieved text—never invented.
+            4. **CHECK:** Enforces an anti-hallucination verification ensuring no IP address in the mitigation text was fabricated (`mitigation_ips - observed_ips == ∅`).
+
+            ---
+            ### Step-by-Step Instructions:
+            1. **Upload a Log:** Drag & drop any `.log`, `.txt`, or `.json` file (sample logs are located in the `logs/` directory).
+            2. **Review Reasoning Trace:** Open the **🧠 Agent reasoning trace** expander to inspect the full audit trail written to `ai_interactions.md`.
+            3. **Inspect Output:** Review the color-coded severity badge, confidence score, and actionable mitigation procedure.
+            4. **Download Playbook:** Click the download button to export the full incident playbook for the incident type.
+            5. **Threat Intelligence Pivot:** For logs containing observed IP addresses, pick an IP and launch a search on VirusTotal, AbuseIPDB, or Shodan.
+            6. **Human Review Sign-off:** Click **✅ Approve Assessment** or **❌ Reject Assessment** to record your decision into `logs/human_evaluations.csv`.
+            """
+        )
 
     uploaded_file = st.file_uploader("Upload a log file", type=["log", "txt", "json"])
 
@@ -261,6 +293,23 @@ if page == "🔍 Triage":
 elif page == "📊 Dashboard":
     st.caption("Every file uploaded on the Triage page is logged here as it's processed.")
 
+    with st.expander("📖 User Guide: Operational Dashboard", expanded=False):
+        st.markdown(
+            """
+            ### What This Menu Does
+            Provides **high-level operational observability** into all triage activities, tracking processed incident volumes,
+            severity breakdowns, safe-fallback error frequencies, and **human-in-the-loop (HITL) agreement rates**.
+
+            ---
+            ### Metrics & Visualizations:
+            - **Triage Volume:** Counts total processed logs, successful classifications, and controlled safe-fallback refusals (from `logs/triage_history.csv`).
+            - **Severity Distribution:** Bar chart showing the operational volume of `critical`, `high`, `medium`, `low`, and `unknown` events.
+            - **Human Review Analytics:** Aggregates human analyst **Approved** vs. **Rejected** decisions (from `logs/human_evaluations.csv`).
+            - **Agreement Rate by AI Severity:** Visualizes analyst alignment per severity level. A lower approval rate on a specific tier (e.g. `medium`) flags heuristic or prompt areas needing tuning.
+            - **Audit Log Tables:** Interactive, timestamped tables recording full incident histories and analyst sign-offs for SOC auditing.
+            """
+        )
+
     history_df = _load_csv(TRIAGE_HISTORY_FILE, TRIAGE_HISTORY_FIELDS)
 
     if history_df.empty:
@@ -331,12 +380,32 @@ elif page == "📊 Dashboard":
             hide_index=True,
         )
 
-elif page == "🧬 RAG Lab (Gemini)":
+elif page in ("📚 RAG Knowledge Base", "🧬 RAG Lab (Gemini)"):
     st.caption(
-        "Bonus Fine-Tuning/Specialization module: a few-shot classifier built on "
-        "Chroma (vector retrieval) + Gemini Flash, kept separate from the "
-        "deterministic baseline above."
+        "Upload reference documents (.txt, .md, .pdf), inspect and manage "
+        "your Chroma vector store, or chat directly with your knowledge base."
     )
+
+    with st.expander("📖 User Guide: RAG Knowledge Base", expanded=False):
+        st.markdown(
+            """
+            ### What This Menu Does
+            Enables **Retrieval-Augmented Generation (RAG)** by indexing technical manuals, internal runbooks,
+            and compliance standards (e.g. NIST guidelines) into a dedicated Chroma vector collection (`custom_uploaded_docs`).
+
+            ---
+            ### Sub-Mode Instructions:
+            1. **⬆️ Upload Document:**
+               - **Supported formats:** `.txt`, `.md`, and `.pdf` files.
+               - **Ingestion Pipeline:** Uses `pypdf` for page-aware extraction, applies paragraph-aware chunking (up to 1,500 characters with 200-character overlap), embeds text via `gemini-embedding-001` (batched in sets of 100 at 768 dimensions), and writes vectors into Chroma.
+               - **Metrics:** Review extraction, embedding, and insertion timings, chunk distributions, and embedding dimensions upon completion.
+            2. **🗂️ Manage Knowledge Base:**
+               - **Zero-API-key Operations:** View all indexed documents, inspect chunk/page counts, delete individual files, or reset the collection. Operates purely locally on the Chroma vector store.
+            3. **💬 Chat with Knowledge Base:**
+               - **Conversational Grounding:** Ask natural-language questions (e.g., *"What does NIST SP 800-94 recommend for isolating compromised web servers?"*).
+               - **Strict Attribution:** Gemini Flash retrieves the top-$k$ relevant chunks and formulates an answer citing the specific source document and page number.
+            """
+        )
 
     try:
         import specialized_agent
@@ -349,7 +418,7 @@ elif page == "🧬 RAG Lab (Gemini)":
 
     rag_mode = st.radio(
         "Mode",
-        ["⬆️ Upload Document", "🗂️ Manage Knowledge Base", "🧪 Test Retrieval vs. Baseline"],
+        ["⬆️ Upload Document", "🗂️ Manage Knowledge Base", "💬 Chat with Knowledge Base"],
         horizontal=True,
     )
     st.markdown("---")
@@ -456,45 +525,363 @@ elif page == "🧬 RAG Lab (Gemini)":
                 st.success(f"Cleared {cleared} chunk(s). Knowledge base is now empty.")
                 st.rerun()
 
-    elif rag_mode == "🧪 Test Retrieval vs. Baseline":
-        st.markdown("### 🧪 Test retrieval + Gemini against the baseline")
+    elif rag_mode == "💬 Chat with Knowledge Base":
+        st.markdown("### 💬 Chat with Knowledge Base")
+        st.caption(
+            "Ask natural-language questions against your uploaded reference documents. "
+            "Gemini embeds the question, retrieves the most relevant excerpts from Chroma, "
+            "and generates an answer citing the specific document name and page number."
+        )
 
         if not os.environ.get("GEMINI_API_KEY"):
             st.warning(
-                "GEMINI_API_KEY is not set, so this page can't call Gemini yet. "
+                "GEMINI_API_KEY is not set, so the chat cannot query Gemini yet. "
                 "Copy `.env.example` to `.env` and fill in a Google AI Studio key, "
                 "or `export GEMINI_API_KEY=\"your-key\"` before launching the app."
             )
 
-        source_choice = st.radio(
-            "Log source", ["Pick a sample log", "Paste your own"], horizontal=True
-        )
-        if source_choice == "Pick a sample log":
-            sample_logs = sorted(p.name for p in Path("logs").glob("*") if p.is_file() and not p.name.endswith(".csv"))
-            chosen = st.selectbox("Sample log", sample_logs)
-            test_content = (Path("logs") / chosen).read_bytes().decode("utf-8", errors="replace") if chosen else ""
-            with st.expander("Log content"):
-                st.text(test_content)
+        docs = specialized_agent.list_custom_documents()
+        if not docs:
+            st.info(
+                "ℹ️ The knowledge base is currently empty. Switch to the **Upload Document** "
+                "tab to upload and index documents (.txt, .md, or .pdf) first."
+            )
         else:
-            test_content = st.text_area("Paste log content to classify", height=150)
+            with st.expander(f"📚 Available Reference Documents ({len(docs)} files indexed)"):
+                st.dataframe(pd.DataFrame(docs), use_container_width=True, hide_index=True)
 
-        include_custom_docs = st.checkbox(
-            "Include uploaded reference documents in retrieval", value=True
+            top_bar_col1, top_bar_col2 = st.columns([3, 1])
+            with top_bar_col1:
+                retrieval_k = st.slider(
+                    "Number of reference chunks to retrieve (k)", min_value=1, max_value=8, value=4
+                )
+            with top_bar_col2:
+                st.write("")
+                if st.button("🧹 Clear Chat", use_container_width=True):
+                    st.session_state["kb_chat_history"] = []
+                    st.rerun()
+
+            chat_history = st.session_state.setdefault("kb_chat_history", [])
+
+            # Render message history
+            for msg in chat_history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                    if msg.get("sources"):
+                        with st.expander("🔎 View retrieved sources"):
+                            for idx, src in enumerate(msg["sources"], start=1):
+                                citation = (
+                                    f"{src['filename']}, page {src['page_number']}"
+                                    if src.get("page_number")
+                                    else src["filename"]
+                                )
+                                st.markdown(f"**Source {idx}: [{citation}]** (distance: `{src['distance']}`)")
+                                st.text(src["text"])
+
+            # Chat input
+            if prompt := st.chat_input("Ask a question about your uploaded documents (e.g. NIST guidelines, runbooks)..."):
+                chat_history.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("⏳ Searching knowledge base & generating answer with Gemini Flash..."):
+                        try:
+                            qa_result = specialized_agent.query_knowledge_base(
+                                query=prompt,
+                                k=retrieval_k,
+                                chat_history=chat_history[:-1],
+                            )
+                            answer = qa_result["answer"]
+                            sources = qa_result.get("sources", [])
+
+                            st.markdown(answer)
+                            if sources:
+                                with st.expander("🔎 View retrieved sources"):
+                                    for idx, src in enumerate(sources, start=1):
+                                        citation = (
+                                            f"{src['filename']}, page {src['page_number']}"
+                                            if src.get("page_number")
+                                            else src["filename"]
+                                        )
+                                        st.markdown(f"**Source {idx}: [{citation}]** (distance: `{src['distance']}`)")
+                                        st.text(src["text"])
+
+                            chat_history.append(
+                                {
+                                    "role": "assistant",
+                                    "content": answer,
+                                    "sources": sources,
+                                }
+                            )
+                        except (RuntimeError, ValueError) as exc:
+                            st.error(str(exc))
+
+elif page == "🧬 Specialized (Chroma + Gemini Flash)":
+    st.caption(
+        "Classify security and ops logs using few-shot vector retrieval in Chroma "
+        "and Google Gemini Flash (`gemini-flash-latest`), with optional reference document "
+        "grounding from your uploaded knowledge base."
+    )
+
+    with st.expander("📖 User Guide: Specialized Agent (Gemini Flash + Chroma)", expanded=False):
+        st.markdown(
+            """
+            ### What This Menu Does
+            Delivers **rich, context-aware AI incident triage** by combining semantic similarity search across labeled few-shot examples
+            with Gemini Flash inference, constrained by a strict JSON schema.
+
+            ---
+            ### Architecture Highlights:
+            - **Vector Retrieval:** The incoming log is embedded using `gemini-embedding-001` (at 768 dimensions) and matched against 18 curated few-shot intrusion/anomaly examples in Chroma (`log_fewshot_examples`).
+            - **RAG Reference Grounding:** If enabled, relevant excerpts from your uploaded custom knowledge base documents are dynamically attached into the prompt context.
+            - **Structured Schema Constraint:** Output is strictly constrained to Pydantic enums (`TriageResult`), guaranteeing that severities never drift outside the canonical vocabulary (`critical`, `high`, `medium`, `low`, `unknown`).
+            - **Post-Generation Safety:** Automatically validates that the model has not invented non-existent IP addresses in the mitigation text.
+
+            ---
+            ### Step-by-Step Instructions:
+            1. **Select Input Mode:**
+               - **Pick a sample log:** Choose from curated fixtures (defaults to clean Snort alert).
+               - **Upload log file:** Provide your own `.log`, `.json`, or `.txt` file.
+               - **Paste log text:** Directly paste unstructured log lines.
+            2. **Configure RAG Grounding:** Toggle the checkbox to include or exclude custom uploaded knowledge base documents.
+            3. **Run Triage:** Click **▶️ Run Specialized Triage**.
+            4. **Review Context & Citations:**
+               - Review the **🎯 Retrieved Few-Shot Examples** to see which labeled training cases guided the model.
+               - Review the **📚 Retrieved Reference Document Citations** to see exact document and page sources.
+            5. **Record Feedback:** Submit your **Approve** or **Reject** evaluation to log your feedback for SOC quality control.
+            """
         )
 
-        if st.button("▶️ Run baseline vs. specialized comparison", use_container_width=True) and test_content.strip():
-            col_baseline, col_specialized = st.columns(2)
+    try:
+        import specialized_agent
+    except ImportError as exc:
+        st.error(
+            f"The specialized-agent dependencies aren't installed ({exc}). "
+            "Run `pip install -r requirements-specialized.txt` to use this page."
+        )
+        st.stop()
 
-            with col_baseline:
-                st.markdown("**Baseline (triage_agent.py)**")
-                try:
-                    baseline_result = process_log(test_content)
-                    st.json(baseline_result)
-                except ValueError as exc:
-                    st.error(f"Safe-fallback error: {exc}")
+    if not os.environ.get("GEMINI_API_KEY"):
+        st.warning(
+            "GEMINI_API_KEY is not set, so this page can't call Gemini yet. "
+            "Copy `.env.example` to `.env` and fill in a Google AI Studio key, "
+            "or `export GEMINI_API_KEY=\"your-key\"` before launching the app."
+        )
 
-            with col_specialized:
-                st.markdown("**Specialized (Chroma + Gemini Flash)**")
+    source_choice = st.radio(
+        "Log source", ["Pick a sample log", "Upload log file", "Paste log text"], horizontal=True
+    )
+    test_content = ""
+    source_filename = "custom_log.txt"
+
+    if source_choice == "Pick a sample log":
+        log_extensions = {".log", ".json", ".txt"}
+        sample_logs = sorted(
+            p.name for p in Path("logs").glob("*")
+            if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in log_extensions
+        )
+        default_index = (
+            sample_logs.index("snort_alert_clean.log")
+            if "snort_alert_clean.log" in sample_logs
+            else 0
+        )
+        chosen = st.selectbox("Sample log", sample_logs, index=default_index)
+        source_filename = chosen or "sample_log.txt"
+        test_content = (Path("logs") / chosen).read_bytes().decode("utf-8", errors="replace") if chosen else ""
+        with st.expander("Raw log content"):
+            st.text(test_content)
+    elif source_choice == "Upload log file":
+        uploaded_log = st.file_uploader(
+            "Upload a log file", type=["log", "txt", "json"], key="specialized_file_uploader"
+        )
+        if uploaded_log is not None:
+            source_filename = uploaded_log.name
+            test_content = uploaded_log.read().decode("utf-8", errors="replace")
+            with st.expander("Raw log content"):
+                st.text(test_content)
+    else:
+        test_content = st.text_area("Paste log content to classify", height=150)
+
+    include_custom_docs = st.checkbox(
+        "Include uploaded reference documents in retrieval (RAG)", value=True
+    )
+
+    if st.button("▶️ Run Specialized Triage", use_container_width=True) and test_content.strip():
+        with st.spinner("⏳ Embedding log, querying Chroma, and generating with Gemini Flash..."):
+            try:
+                specialized_result = specialized_agent.classify_with_llm(
+                    test_content, include_custom_docs=include_custom_docs
+                )
+            except RuntimeError as exc:
+                st.error(str(exc))
+            except ValueError as exc:
+                if "Corrupted or unparseable" in str(exc):
+                    st.warning(f"🛡️ Guardrail triggered (Safe fallback):\n\n{exc}")
+                else:
+                    st.error(f"Post-generation check failed: {exc}")
+            else:
+                sev = specialized_result["severity"]
+                color = {
+                    "critical": "red",
+                    "high": "orange",
+                    "medium": "blue",
+                    "low": "green",
+                    "unknown": "gray",
+                }.get(sev, "gray")
+                st.markdown(f"### Severity: :{color}[{sev.upper()}]")
+                st.metric("Confidence score", f"{specialized_result['confidence_score']:.2f}")
+                st.markdown("**Mitigation:**")
+                st.write(specialized_result["mitigation"])
+
+                if specialized_result["few_shot_examples_used"]:
+                    with st.expander("🎯 Retrieved Few-Shot Examples"):
+                        st.dataframe(
+                            pd.DataFrame(specialized_result["few_shot_examples_used"]),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                if specialized_result["custom_docs_used"]:
+                    with st.expander("📚 Retrieved Reference Document Citations"):
+                        st.dataframe(
+                            pd.DataFrame(specialized_result["custom_docs_used"]),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                with st.expander("📤 Complete JSON Response"):
+                    st.json(specialized_result)
+
+                observed_ips = sorted(set(IP_PATTERN.findall(test_content)))
+                if observed_ips:
+                    st.markdown("**🔎 Threat intelligence lookup**")
+                    st.caption("Pivots on IPs observed in the source log:")
+                    sel_col1, sel_col2 = st.columns(2)
+                    with sel_col1:
+                        selected_ip = st.selectbox("Observed IP", observed_ips, key="spec_ip")
+                    with sel_col2:
+                        selected_svc = st.selectbox(
+                            "Lookup service", list(THREAT_INTEL_SERVICES.keys()), key="spec_svc"
+                        )
+                    url_template = THREAT_INTEL_SERVICES[selected_svc]
+                    lookup_url = url_template.format(ip=selected_ip)
+                    st.link_button(
+                        f"🌐 Open {selected_svc} for {selected_ip}",
+                        lookup_url,
+                        use_container_width=True,
+                    )
+
+                st.markdown("---")
+                st.markdown("#### Human Review")
+                btn_c1, btn_c2 = st.columns(2)
+                with btn_c1:
+                    if st.button("✅ Approve Assessment", use_container_width=True, key="spec_approve"):
+                        _save_human_evaluation(source_filename, sev, "approved")
+                        st.success("Recorded: Approved")
+                with btn_c2:
+                    if st.button("❌ Reject Assessment", use_container_width=True, key="spec_reject"):
+                        _save_human_evaluation(source_filename, sev, "rejected")
+                        st.error("Recorded: Rejected")
+
+elif page == "🧪 Test Retrieval vs. Baseline":
+    st.caption(
+        "Run any log through BOTH the deterministic baseline (`triage_agent.py`) and "
+        "the Chroma + Gemini Flash agent side-by-side to compare severities, confidence "
+        "calibrations, mitigations, and guardrail behaviors."
+    )
+
+    with st.expander("📖 User Guide: Head-to-Head Comparison", expanded=False):
+        st.markdown(
+            """
+            ### What This Menu Does
+            Provides a **side-by-side comparative benchmark** running any input log through both the
+            **deterministic baseline agent** and the **Chroma + Gemini Flash agent** simultaneously.
+
+            ---
+            ### Why Compare Both Agents?
+            1. **Severity Consistency:** Verify if semantic vector retrieval guides the LLM to the exact same incident severity as the deterministic rule-based baseline.
+            2. **Confidence Calibration Contrast:** Notice how the baseline's confidence reflects literal evidence counts (0.10 for ambiguous logs up to 0.98 for clean alerts), while Gemini self-reports near-constant high confidence (0.90–0.99).
+            3. **Guardrail Divergence:** Testing `corrupted_log.txt` demonstrates how both agents enforce pre-flight integrity checks to safely refuse garbled inputs rather than hallucinating plausible rationales.
+            4. **Mitigation Quality:** Contrast templated runbook procedures against context-aware, tailored natural language instructions.
+
+            ---
+            ### Step-by-Step Instructions:
+            1. **Choose a Test Input:** Select one of the pre-loaded fixtures (`snort_alert_clean.log`, `netdata_anomaly_clean.json`, `corrupted_log.txt`), upload a file, or paste raw text.
+            2. **Toggle Reference Grounding:** Decide whether custom uploaded knowledge base documents should be retrieved into Gemini's prompt.
+            3. **Run Comparison:** Click **▶️ Run Baseline vs. Specialized Comparison**.
+            4. **Inspect Side-by-Side Cards:** Symmetrically compare JSON structures, extracted severities, and confidence ratings.
+            5. **Check Agreement Banner:** Review the automated **Side-by-Side Assessment Summary** banner showing exact agreement status and confidence score comparisons.
+            6. **Examine Centered Grounding Evidence:** Scroll to the bottom to inspect all retrieved few-shot training examples and custom document citations centered across the screen.
+            """
+        )
+
+    try:
+        import specialized_agent
+    except ImportError as exc:
+        st.error(
+            f"The specialized-agent dependencies aren't installed ({exc}). "
+            "Run `pip install -r requirements-specialized.txt` to use this page."
+        )
+        st.stop()
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        st.warning(
+            "GEMINI_API_KEY is not set, so this page can't call Gemini yet. "
+            "Copy `.env.example` to `.env` and fill in a Google AI Studio key, "
+            "or `export GEMINI_API_KEY=\"your-key\"` before launching the app."
+        )
+
+    source_choice = st.radio(
+        "Log source", ["Pick a sample log", "Upload log file", "Paste log text"], horizontal=True, key="comp_src"
+    )
+    test_content = ""
+
+    if source_choice == "Pick a sample log":
+        log_extensions = {".log", ".json", ".txt"}
+        sample_logs = sorted(
+            p.name for p in Path("logs").glob("*")
+            if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in log_extensions
+        )
+        default_index = (
+            sample_logs.index("snort_alert_clean.log")
+            if "snort_alert_clean.log" in sample_logs
+            else 0
+        )
+        chosen = st.selectbox("Sample log", sample_logs, index=default_index, key="comp_sample")
+        test_content = (Path("logs") / chosen).read_bytes().decode("utf-8", errors="replace") if chosen else ""
+        with st.expander("Raw log content"):
+            st.text(test_content)
+    elif source_choice == "Upload log file":
+        uploaded_log = st.file_uploader(
+            "Upload a log file", type=["log", "txt", "json"], key="comp_file_uploader"
+        )
+        if uploaded_log is not None:
+            test_content = uploaded_log.read().decode("utf-8", errors="replace")
+            with st.expander("Raw log content"):
+                st.text(test_content)
+    else:
+        test_content = st.text_area("Paste log content to classify", height=150, key="comp_paste")
+
+    include_custom_docs = st.checkbox(
+        "Include uploaded reference documents in retrieval (RAG)", value=True, key="comp_rag"
+    )
+
+    if st.button("▶️ Run Baseline vs. Specialized Comparison", use_container_width=True) and test_content.strip():
+        col_baseline, col_specialized = st.columns(2)
+        baseline_result = None
+        specialized_result = None
+
+        with col_baseline:
+            st.markdown("**Baseline (triage_agent.py)**")
+            try:
+                baseline_result = process_log(test_content)
+                st.json(baseline_result)
+            except ValueError as exc:
+                st.warning(f"🛡️ Guardrail triggered (Safe fallback):\n\n{exc}")
+
+        with col_specialized:
+            st.markdown("**Specialized (Chroma + Gemini Flash)**")
+            with st.spinner("⏳ Embedding log, querying Chroma, and generating with Gemini Flash..."):
                 try:
                     specialized_result = specialized_agent.classify_with_llm(
                         test_content, include_custom_docs=include_custom_docs
@@ -502,21 +889,49 @@ elif page == "🧬 RAG Lab (Gemini)":
                 except RuntimeError as exc:
                     st.error(str(exc))
                 except ValueError as exc:
-                    st.error(f"Gemini response rejected: {exc}")
+                    if "Corrupted or unparseable" in str(exc):
+                        st.warning(f"🛡️ Guardrail triggered (Safe fallback):\n\n{exc}")
+                    else:
+                        st.error(f"Post-generation check failed: {exc}")
                 else:
                     st.json(specialized_result)
 
-                    if specialized_result["few_shot_examples_used"]:
-                        st.markdown("**Few-shot examples retrieved:**")
-                        st.dataframe(
-                            pd.DataFrame(specialized_result["few_shot_examples_used"]),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    if specialized_result["custom_docs_used"]:
-                        st.markdown("**Custom document context retrieved:**")
-                        st.dataframe(
-                            pd.DataFrame(specialized_result["custom_docs_used"]),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
+        # Summary comparison metrics if both agents completed
+        if baseline_result and specialized_result:
+            st.markdown("---")
+            st.markdown("### 📊 Side-by-Side Assessment Summary")
+            b_sev = baseline_result["severity"].lower()
+            s_sev = specialized_result["severity"].lower()
+            if b_sev == s_sev:
+                st.success(f"✅ **Severity Agreement:** Both agents classified this log as **{b_sev.upper()}**.")
+            else:
+                st.info(f"⚖️ **Severity Divergence:** Baseline assigned **{b_sev.upper()}**, while Specialized assigned **{s_sev.upper()}**.")
+
+            metric_col1, metric_col2 = st.columns(2)
+            metric_col1.metric("Baseline Confidence", f"{baseline_result['confidence_score']:.2f}")
+            metric_col2.metric("Specialized Confidence", f"{specialized_result['confidence_score']:.2f}")
+
+        # Centered evidence review for retrieved few-shot and custom documents
+        if specialized_result:
+            few_shots = specialized_result.get("few_shot_examples_used")
+            custom_docs = specialized_result.get("custom_docs_used")
+
+            if few_shots or custom_docs:
+                st.markdown("---")
+                st.markdown("### 🔎 Retrieval Evidence & Grounding Review")
+
+                if few_shots:
+                    st.markdown("**Few-shot examples retrieved:**")
+                    st.dataframe(
+                        pd.DataFrame(few_shots),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                if custom_docs:
+                    st.markdown("**Custom document context retrieved:**")
+                    st.dataframe(
+                        pd.DataFrame(custom_docs),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
