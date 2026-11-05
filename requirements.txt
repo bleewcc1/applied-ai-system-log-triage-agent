@@ -1,3 +1,7 @@
 pytest
 streamlit
 pandas
+chromadb
+google-genai
+python-dotenv
+pypdf
