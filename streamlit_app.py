@@ -54,6 +54,11 @@ THREAT_INTEL_SERVICES = {
 TRIAGE_HISTORY_FILE = Path("logs") / "triage_history.csv"
 TRIAGE_HISTORY_FIELDS = ["timestamp", "log_filename", "status", "severity", "confidence_score", "detail"]
 
+# Extensions accepted by every log-upload widget. All are plain text under
+# the hood (decoded as UTF-8 with errors="replace"), so the agent doesn't
+# care which one it's handed - this list is just the file-picker filter.
+LOG_UPLOAD_TYPES = ["log", "txt", "json", "csv", "tsv", "md", "out", "conf", "cfg"]
+
 
 def _append_csv_row(path: Path, fieldnames: list[str], row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +184,7 @@ if page in ("🔍 Baseline Triage", "🔍 Triage"):
 
             ---
             ### Step-by-Step Instructions:
-            1. **Upload a Log:** Drag & drop any `.log`, `.txt`, or `.json` file (sample logs are located in the `logs/` directory).
+            1. **Upload a Log:** Drag & drop any `.log`, `.txt`, `.json`, `.csv`, `.tsv`, `.md`, `.out`, `.conf`, or `.cfg` file (sample logs are located in the `logs/` directory).
             2. **Review Reasoning Trace:** Open the **🧠 Agent reasoning trace** expander to inspect the full audit trail written to `ai_interactions.md`.
             3. **Inspect Output:** Review the color-coded severity badge, confidence score, and actionable mitigation procedure.
             4. **Download Playbook:** Click the download button to export the full incident playbook for the incident type.
@@ -188,7 +193,7 @@ if page in ("🔍 Baseline Triage", "🔍 Triage"):
             """
         )
 
-    uploaded_file = st.file_uploader("Upload a log file", type=["log", "txt", "json"])
+    uploaded_file = st.file_uploader("Upload a log file", type=LOG_UPLOAD_TYPES)
 
     if uploaded_file is not None:
         raw_bytes = uploaded_file.read()
@@ -693,7 +698,7 @@ elif page == "🧬 Specialized (Chroma + Gemini Flash)":
             st.text(test_content)
     elif source_choice == "Upload log file":
         uploaded_log = st.file_uploader(
-            "Upload a log file", type=["log", "txt", "json"], key="specialized_file_uploader"
+            "Upload a log file", type=LOG_UPLOAD_TYPES, key="specialized_file_uploader"
         )
         if uploaded_log is not None:
             source_filename = uploaded_log.name
@@ -853,7 +858,7 @@ elif page == "🧪 Test Retrieval vs. Baseline":
             st.text(test_content)
     elif source_choice == "Upload log file":
         uploaded_log = st.file_uploader(
-            "Upload a log file", type=["log", "txt", "json"], key="comp_file_uploader"
+            "Upload a log file", type=LOG_UPLOAD_TYPES, key="comp_file_uploader"
         )
         if uploaded_log is not None:
             test_content = uploaded_log.read().decode("utf-8", errors="replace")
